@@ -1,2 +1,2 @@
 # mallOK
-Implementation of malloc that is'n amazing nor trash, it's just ok.
+Implementation of malloc that isn't amazing nor trash, it's just ok.
