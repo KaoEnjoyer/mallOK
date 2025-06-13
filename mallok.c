@@ -13,6 +13,8 @@
 struct _heap_type;
 struct _heap_chunk;
 
+//size_t _align_memory
+
 size_t get_page_size() { return sysconf(_SC_PAGE_SIZE); }
 int _init_heap(struct _heap_type *heap, size_t size);
 
@@ -21,6 +23,7 @@ struct _heap_type _head;
 struct _heap_chunk {
   short is_used;
   size_t size;
+  void* ptr;//ptr o chunk memory
   struct _heap_chunk *next;
 };
 
@@ -33,12 +36,19 @@ void *mallOK(size_t size) {
   if (_head.start == NULL) {
     _init_heap(&_head, size);
   }
-  if (_head.start->is_used || _head.start->size < size) {
+
+  struct _heap_chunk *toReturn = _head.start;
+  while(toReturn->is_used || toReturn->size < size){
+    toReturn = toReturn->next;
+      if(toReturn == NULL)break;
+  }
+  if (toReturn == NULL) {
     fprintf(stderr, "MALLOK COULD NOT FIND FREE CHUNK %u , %u \n",
             _head.start->is_used, _head.start->size);
     return MALLOK_FAILED;
   }
-  struct _heap_chunk *toReturn = _head.start;
+
+  
   size_t offset = size;
   if (_head.start->next == NULL) {
     _head.start = (void *)((char *)_head.start + size);
@@ -68,10 +78,18 @@ int _init_heap(struct _heap_type *heap, size_t size) {
   chunk->size = get_page_size() - sizeof(struct _heap_chunk);
   chunk->is_used = 0;
   chunk->next = NULL;
+  chunk->ptr = chunk+1;
   heap->start = chunk;
   heap->empty_chunks = 1;
   return GOOD_ALLOC;
 }
+
+
+void MallNotOk(void* ptr){
+//dealocation of memory (like free, delete)
+  printf("idk czy to tak działa %d",sizeof(ptr));
+}
+
 
 struct test {
   int a;
@@ -82,6 +100,7 @@ struct test {
 int main(int argc, char *argv[]) {
 
   int *foo = (int *)mallOK(sizeof(int));
+  int *faoo = (int *)mallOK(sizeof(int));
   *foo = 22;
   printf("value: %d, addres: %p\n", *foo, foo);
   printf("first chunk is used: %d\n", _head.start->is_used);
@@ -92,6 +111,9 @@ int main(int argc, char *argv[]) {
   T->b = 33;
   T->c = 'c';
   
-  
+    
   printf("struct T a: %d , b: %d , c: %c , addres: %p", T->a, T->b, T->c, T);
+    printf("{%d}",sizeof(T));
+  MallNotOk(T);
 }
+
