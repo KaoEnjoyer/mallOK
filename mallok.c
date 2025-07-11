@@ -1,97 +1,114 @@
-#include <fcntl.h>
+#include "mallok.h"
+#include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <string.h>
 
-#define GOOD_ALLOC 0
-#define BAD_ALLOC -1
-#define MALLOK_FAILED (void *)(-1)
+// global head of heap ptr
+static struct HeadType g_head;
 
-struct _heap_type;
-struct _heap_chunk;
+static int InitHeap() {
 
-size_t get_page_size() { return sysconf(_SC_PAGE_SIZE); }
-int _init_heap(struct _heap_type *heap, size_t size);
+  for (int i = 0; i < CHUNK_ARR_SIZE; i++) {
+    g_head.freeChunkArray[i] = NULL;
+  }
+  size_t size = GetPageSize();
+  void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-struct _heap_type _head;
+  if (ptr == NULL)
+    Panic("mmap returen null");
 
-struct _heap_chunk {
-  short is_used;
-  size_t size;
-  struct _heap_chunk *next;
-};
+  MemoryChunk *chunk = InitChunk(ptr, size);
 
-struct _heap_type {
-  size_t empty_chunks;
-  struct _heap_chunk *start;
-};
+  g_head.freeChunkArray[CHUNK_ARR_SIZE - 1] = chunk;
+  g_head.freeChunks = 1;
+  return 22;
+}
+
+MemoryChunk *InitChunk(void *ptr, size_t size) {
+  MemoryChunk *chunk = (MemoryChunk *)ptr; // check this later
+  chunk->size = size ;//carefull
+  chunk->isUsed = false;
+  chunk->ptr = (void *)((char *)(ptr) + sizeof(MemoryChunk));
+  chunk->next = NULL;
+  chunk->prev = NULL;
+  return chunk;
+}
+
+MemoryChunk *FindChunkToAlloc(size_t size) {
+  if (g_head.freeChunks == 0) {
+    Panic("List of free chunks is empty");
+  }
+  int id = 0;
+  for (id; id < CHUNK_ARR_SIZE - 1; id++) {
+    if ((1 << id) >= size)
+      break;
+  }
+
+  MemoryChunk *chunk = g_head.freeChunkArray[id];
+  if (chunk == NULL) {
+    if (g_head.freeChunkArray[id + 1] != NULL) {
+      // TODO: pobieranie pamieci z wyższych binów , oraz optylalizcja wobec
+      // fragmentacji
+    }
+
+      chunk = DivideChunk(size, g_head.freeChunkArray[CHUNK_ARR_SIZE-1]) ;
+    return chunk;
+    Panic("TUTAJ MA BYĆ IMPLEMENTACAJ POBIERANIA Z WILD CHUNKA ");
+  }
+  while (chunk != NULL) {
+    if (chunk->isUsed)
+      return chunk;
+    chunk = chunk->next;
+  }
+
+  return NULL;
+}
+
+static void DebugChunk(MemoryChunk *mc) {
+
+  printf("size: %zu, isUsed: %d , adr: %p, ptr: %p\n", mc->size, mc->isUsed, mc,
+         mc->ptr);
+}
+
+static size_t GetPageSize() { return sysconf(_SC_PAGE_SIZE); }
+
+void Panic(char *msg) {
+  fprintf(stderr, "%s", msg);
+  strerror(errno);
+  exit(BAD_ALLOC);
+}
+
+static size_t GetAligment(size_t size) {
+  // for now we assume that the aligmnt is to 16 bytes
+  return 16 - (size % 16);
+
+  // TODO: thats trash
+}
+static size_t GetChunkSize(MemoryChunk *chunk) {
+  return chunk->size + sizeof(MemoryChunk);
+}
+static MemoryChunk *DivideChunk(size_t size, MemoryChunk *from) {
+  if (size + sizeof(MemoryChunk) > from->size) {
+    Panic("this chunk can be divided!!");
+  } else {
+    
+    MemoryChunk *temp = InitChunk(from->ptr, size);
+    from->ptr = (char*)(from->ptr) + GetChunkSize(temp);
+    from->size -= size;    
+    return temp;
+  }
+  return NULL;
+}
 
 void *mallOK(size_t size) {
-  if (_head.start == NULL) {
-    _init_heap(&_head, size);
+  if (g_head.freeChunkArray[CHUNK_ARR_SIZE - 1] == NULL) {
+    printf("okej inicjujemy\n");
+    InitHeap();
   }
-  if (_head.start->is_used || _head.start->size < size) {
-    fprintf(stderr, "MALLOK COULD NOT FIND FREE CHUNK %u , %u \n",
-            _head.start->is_used, _head.start->size);
-    return MALLOK_FAILED;
-  }
-  struct _heap_chunk *toReturn = _head.start;
-  size_t offset = size;
-  if (_head.start->next == NULL) {
-    _head.start = (void *)((char *)_head.start + size);
-    _head.start->size = toReturn->size - size;
-    _head.start->is_used = 0;
-  } else {
-    _head.start->next = (void *)((char *)_head.start + size);
-    _head.start = _head.start->next;
-    _head.start->size = _head.start->size + (toReturn->size - size);
-    _head.start->is_used = 0;
-  }
+  MemoryChunk *chunk = FindChunkToAlloc(size);
 
-  printf("next chunk size: %u\n", _head.start->size);
-  return toReturn;
-}
-
-int _init_heap(struct _heap_type *heap, size_t size) {
-  void *ptr = mmap(NULL, get_page_size(), PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1,
-                   0); // dowiedz się dalczego można tutaj dać -1
-  if (ptr == MAP_FAILED) {
-    fprintf(stderr, "BAD ALLOC MMAP FAILED\n");
-    exit(BAD_ALLOC);
-  }
-
-  struct _heap_chunk *chunk = (struct _heap_chunk *)ptr;
-  chunk->size = get_page_size() - sizeof(struct _heap_chunk);
-  chunk->is_used = 0;
-  chunk->next = NULL;
-  heap->start = chunk;
-  heap->empty_chunks = 1;
-  return GOOD_ALLOC;
-}
-
-struct test {
-  int a;
-  int b;
-  char c;
-};
-
-int main(int argc, char *argv[]) {
-
-  int *foo = (int *)mallOK(sizeof(int));
-  *foo = 22;
-  printf("value: %d, addres: %p\n", *foo, foo);
-  printf("first chunk is used: %d\n", _head.start->is_used);
-  int *bar = (int *)mallOK(sizeof(int));
-
-  struct test *T = (struct test *)mallOK(sizeof(struct test));
-  T->a = 2;
-  T->b = 33;
-  T->c = 'c';
-  
-  
-  printf("struct T a: %d , b: %d , c: %c , addres: %p", T->a, T->b, T->c, T);
+  return chunk->ptr;
+  DebugChunk(chunk);
+  return 0;
 }
